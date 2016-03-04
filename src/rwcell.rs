@@ -106,7 +106,6 @@ impl<T> RWCell<T> {
 
 	// 4 bits for rw part
 	fn rw_part(marker: usize) -> usize { marker & 15 }
-	fn new_value_exists(marker: usize) -> bool { 0 != (marker & 1) }
 	fn reader_pos(marker: usize) -> usize { (Self::rw_part(marker) / 4) % 3 }
 	fn reader_switch(&self, marker: usize) -> usize {
 		if Self::rw_part(marker) > 7 {

@@ -1,9 +1,15 @@
-#![feature(shared, ptr_as_ref, time2)]
+#![feature(shared, ptr_as_ref)]
+
+#![cfg(test)]
+#![feature(time2)]
+
+
 
 
 pub mod rwcell;
 pub mod intrusive_rc;	// TODO: Move to external crate
 
+pub use rwcell::RWCell;
 use intrusive_rc::IRc;
 use std::ops::{ Deref, DerefMut };
 use std::convert::{ AsRef, AsMut };
@@ -13,15 +19,15 @@ use std::clone::Clone;
 
 
 /// The writing-half of the RWCell type. This half can only be owned by one thread, but it can be cloned to send to other threads.
-pub struct CellWrite<T>(IRc<rwcell::RWCell<T>>);
+pub struct CellWrite<T>(IRc<RWCell<T>>);
 unsafe impl<T> Send for CellWrite<T> {}	// Note: Those types are not Sync
 impl<T> CellWrite<T> {
 	/// Put a new value into cell
-	fn set(&mut self, value: T) { unsafe { self.0.write(value); } }
+	pub fn set(&mut self, value: T) { unsafe { self.0.write(value); } }
 }
 
 /// The reading-half of RWCell type. This half can only be owned by one thread
-pub struct CellRead<T>(IRc<rwcell::RWCell<T>>);
+pub struct CellRead<T>(IRc<RWCell<T>>);
 unsafe impl<T> Send for CellRead<T> {}	// Note: Those types are not Sync
 impl<T> Deref for CellRead<T> {
 	type Target = T;
@@ -33,12 +39,12 @@ impl<T> AsMut<T> for CellRead<T> { fn as_mut(&mut self) -> &mut T { unsafe { sel
 impl<T> Borrow<T> for CellRead<T> { fn borrow(&self) -> &T { self.as_ref() } }
 
 /// Creates a new RWCell, returning the writing/reading halves.
-fn make_rw_cell<T>(initial: T) -> (CellWrite<T>, CellRead<T>) {
-	let irc = rwcell::RWCell::new(initial);
+pub fn make_rw_cell<T>(initial: T) -> (CellWrite<T>, CellRead<T>) {
+	let irc = RWCell::new(initial);
 	(CellWrite(irc.clone()), CellRead(irc))
 }
 
-// #[cfg(test)]
+#[cfg(test)]
 mod tests {
 
 use std::thread::{ spawn, sleep };
@@ -70,10 +76,7 @@ fn smoke_test() {
 		sleep(Duration::new(0, 10));
 	}
 
-	match rth.join() {
-		Ok(()) => {}
-		Err(ref boxed) => {}
-	}
+	rth.join().unwrap();
 
 	println!("rwcell\t- finish in: {:?}", time.elapsed().unwrap());
 }
@@ -81,7 +84,7 @@ fn smoke_test() {
 #[test]
 fn smoke_test2() {
 	let time = SystemTime::now();
-	let (mut w, mut r) = mpsc::channel();
+	let (w, r) = mpsc::channel();
 
 	let rth = spawn(move || {
 		println!("reader ready");
@@ -98,16 +101,13 @@ fn smoke_test2() {
 	});
 
 	for i in 4..10000 {
-		w.send(i);
+		w.send(i).unwrap();
 		sleep(Duration::new(0, 10));
 	}
 
 	drop(w);
 
-	match rth.join() {
-		Ok(()) => {}
-		Err(ref boxed) => {}
-	}
+	rth.join().unwrap();
 
 	println!("mpsc\t- finish in: {:?}", time.elapsed().unwrap());
 }
