@@ -2,6 +2,9 @@
 name = "rwcell"
 version = "0.1.0"
 authors = ["scareaangel <scareaangel@gmail.com>"]
+description = "rwcell - value container which allow to simultaneously read and modify value from two separate threads"
+repository = "https://github.com/SCareAngel/rwcell-rs"
+license = "MIT/Apache-2.0"
 
 [dependencies]
 
