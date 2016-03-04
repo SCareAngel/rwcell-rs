@@ -1,0 +1,7 @@
+[package]
+name = "triple-buffer"
+version = "0.1.0"
+authors = ["scareaangel <scareaangel@gmail.com>"]
+
+[dependencies]
+
