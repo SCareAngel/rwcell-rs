@@ -7,7 +7,7 @@ use std::mem;
 use std::ptr;
 use std::fmt::{ Debug, Formatter, Error };
 
-use intrusive_rc::{ IntrusiveRefCounter, IRc };
+use intrusive_rc::{ IntrusiveRefCounter };
 
 /*
 	writer( x ) = (x ^ 2) | 1
@@ -40,19 +40,13 @@ pub struct RWCell<T> {
 }
 
 impl<T> RWCell<T> {
-	pub fn new(values: T) -> IRc<RWCell<T>> {
-		let new = RWCell {
+	// Create new cell
+	// Note: It must be disposed not dropped!
+	pub unsafe fn new(values: T) -> RWCell<T> {
+		RWCell {
 			values: unsafe { UnsafeCell::new([values, mem::uninitialized(), mem::uninitialized()]) },
 			marker: AtomicUsize::new(0)
-		};
-		IRc::new(new)
-	}
-
-	unsafe fn dispose(self) {
-		let marker = self.marker.load(Ordering::Relaxed);
-		let pos = Self::reader_pos(marker);
-		mem::drop(ptr::read(self.inner_get(pos)));
-		mem::forget(self); // do not attempt to drop anything else
+		}
 	}
 
 	pub unsafe fn read(&self) -> &mut T {
@@ -118,18 +112,23 @@ impl<T> RWCell<T> {
 	fn writer_pos(marker: usize) -> usize { 2 - ((Self::rw_part(marker) / 2) % 3) }
 }
 
-impl<T> IntrusiveRefCounter for RWCell<T> {
+unsafe impl<T> IntrusiveRefCounter for RWCell<T> {
 	fn acquire_ref(p: ptr::Shared<Self>) {
 		// sizeof(Usize) * 8 - 4 bits for ref counting
 		unsafe {p.as_ref().unwrap().marker.fetch_add(16, Ordering::Relaxed);}
 	}
 
-	fn release_ref(p: ptr::Shared<Self>) {
+	fn release_ref(p: ptr::Shared<Self>) -> bool {
 		// sizeof(Usize) * 8 - 4 bits for ref counting
-		if 16 == unsafe { p.as_ref().unwrap().marker.fetch_sub(16, Ordering::AcqRel) } {
-			unsafe { Box::from_raw(p.as_mut().unwrap()).dispose() }
-		}
-	}	
+		16 == unsafe { p.as_ref().unwrap().marker.fetch_sub(16, Ordering::AcqRel) }
+	}
+
+	fn dispose(self) {
+		let marker = self.marker.load(Ordering::Relaxed);
+		let pos = Self::reader_pos(marker);
+		mem::drop(ptr::read(self.inner_get(pos)));
+		mem::forget(self); // do not attempt to drop anything else
+	}
 }
 
 unsafe impl<T: Send + Copy> Send for RWCell<T> {}

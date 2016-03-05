@@ -3,8 +3,19 @@ use std::ops::Deref;
 
 /// Trait allow type to use owned reference counter via IRc
 pub trait IntrusiveRefCounter {
+	/// Increment intrusive reference counter
+	/// Use it prior to copying of the pointer
 	fn acquire_ref(p: ptr::Shared<Self>);
-	fn release_ref(p: ptr::Shared<Self>);
+
+	/// Decrement intrusive reference counter
+	/// Return True if the counter has been droped to zero
+	/// Object itself does not carry information about how it should be deleted
+	fn release_ref(p: ptr::Shared<Self>) -> bool;
+
+
+	/// When last reference is released object must be disposed instead of dropped
+	/// Although default implementation is drop
+	fn dispose(self) {}
 }
 
 /// Pointer wrapper. Use IntrusiveRefCounter to track reference count
@@ -24,7 +35,9 @@ impl<T: IntrusiveRefCounter> IRc<T> {
 impl<T: IntrusiveRefCounter> Drop for IRc<T> {
 	/// Release one reference
 	fn drop(&mut self) {
-		T::release_ref(self.0);
+		if T::release_ref(self.0) {
+			Box::from_raw(self.0.as_mut().unwrap()).dispose();
+		}
 	}
 }
 
