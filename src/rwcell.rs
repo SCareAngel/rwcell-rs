@@ -7,8 +7,6 @@ use std::mem;
 use std::ptr;
 use std::fmt::{ Debug, Formatter, Error };
 
-use intrusive_rc::{ IntrusiveRefCounter };
-
 /*
 	writer( x ) = (x ^ 2) | 1
 	reader( x ) = (x & 1) ? x + 5 : x
@@ -36,19 +34,24 @@ use intrusive_rc::{ IntrusiveRefCounter };
 
 pub struct RWCell<T> {
 	marker: AtomicUsize,
-	values: UnsafeCell<[T;3]>,
+	values: Option<UnsafeCell<[T;3]>>,
 }
 
+
+/// Specail cell type which allow to be read and written simultaneously
+/// But only one read and one write
 impl<T> RWCell<T> {
-	// Create new cell
-	// Note: It must be disposed not dropped!
-	pub unsafe fn new(values: T) -> RWCell<T> {
+	/// Create new cell
+	/// Note: It must be disposed not dropped!
+	pub fn new(value: T) -> RWCell<T> {
 		RWCell {
-			values: unsafe { UnsafeCell::new([values, mem::uninitialized(), mem::uninitialized()]) },
+			values: unsafe { Some(UnsafeCell::new([value, mem::uninitialized(), mem::uninitialized()])) },
 			marker: AtomicUsize::new(0)
 		}
 	}
 
+	/// Read stored value
+	/// Simultaneous reads may lead to undefined behaviuor
 	pub unsafe fn read(&self) -> &mut T {
 		let marker0 = self.marker.load(Ordering::Acquire);
 		// calculate read position
@@ -72,6 +75,8 @@ impl<T> RWCell<T> {
 		}
 	}
 
+	/// Store new value
+	/// Simultaneous writes may lead to undefined behaviuor
 	pub unsafe fn write(&self, values: T) {
 		let marker0 = self.marker.load(Ordering::Acquire);
 		// calculate write position
@@ -96,47 +101,37 @@ impl<T> RWCell<T> {
 		}		
 	}
 
-	unsafe fn inner_get<'a>(&'a self, index: usize) -> &'a mut T { &mut (*self.values.get())[index] }
+	unsafe fn inner_get<'a>(&'a self, index: usize) -> &'a mut T {&mut (*self.values.as_ref().unwrap().get())[index] }
 
-	// 4 bits for rw part
-	fn rw_part(marker: usize) -> usize { marker & 15 }
-	fn reader_pos(marker: usize) -> usize { (Self::rw_part(marker) / 4) % 3 }
+	fn reader_pos(marker: usize) -> usize { (marker / 4) % 3 }
 	fn reader_switch(&self, marker: usize) -> usize {
-		if Self::rw_part(marker) > 7 {
+		if marker > 7 {
 			self.marker.fetch_sub(7, Ordering::AcqRel) - 7
 		} else {
 			self.marker.fetch_add(5, Ordering::AcqRel) + 5
 		}
 	}
 
-	fn writer_pos(marker: usize) -> usize { 2 - ((Self::rw_part(marker) / 2) % 3) }
+	fn writer_pos(marker: usize) -> usize { 2 - ((marker / 2) % 3) }
 }
 
-unsafe impl<T> IntrusiveRefCounter for RWCell<T> {
-	fn acquire_ref(p: ptr::Shared<Self>) {
-		// sizeof(Usize) * 8 - 4 bits for ref counting
-		unsafe {p.as_ref().unwrap().marker.fetch_add(16, Ordering::Relaxed);}
-	}
-
-	fn release_ref(p: ptr::Shared<Self>) -> bool {
-		// sizeof(Usize) * 8 - 4 bits for ref counting
-		16 == unsafe { p.as_ref().unwrap().marker.fetch_sub(16, Ordering::AcqRel) }
-	}
-
-	fn dispose(self) {
+impl<T> Drop for RWCell<T> {
+	fn drop(&mut self) {
 		let marker = self.marker.load(Ordering::Relaxed);
 		let pos = Self::reader_pos(marker);
-		mem::drop(ptr::read(self.inner_get(pos)));
-		mem::forget(self); // do not attempt to drop anything else
-	}
+		unsafe {
+			mem::drop(ptr::read(self.inner_get(pos)));
+			mem::forget(self.values.take()); // do not attempt to drop anything else
+		}
+	}	
 }
 
-unsafe impl<T: Send + Copy> Send for RWCell<T> {}
+unsafe impl<T: Send> Send for RWCell<T> {}
 
 
 impl<T: Debug> Debug for RWCell<T> {
 	fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
 		let marker = self.marker.load(Ordering::Relaxed);
-		write!(f, "values: {:?}, marker: {:?}", unsafe { &*self.values.get() }, marker)
+		write!(f, "values: {:?}, marker: {:?}", unsafe { &*self.values.as_ref().unwrap().get() }, marker)
 	}
 }
