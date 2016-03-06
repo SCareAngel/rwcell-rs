@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod tests {
 
 use std::thread::{ spawn, sleep };
 use std::time::Duration;
@@ -66,5 +64,3 @@ fn smoke_test2() {
 	println!("mpsc\t- finish in: {:?}", time.elapsed().unwrap());
 }
 
-
-}

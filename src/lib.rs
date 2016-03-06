@@ -3,6 +3,8 @@
 
 pub mod rwcell;
 pub use rwcell::RWCell;
+
+#[cfg(test)]
 mod test;
 
 use std::sync::Arc;
